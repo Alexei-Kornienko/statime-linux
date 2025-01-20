@@ -1,0 +1,35 @@
+[package]
+name = "statime-linux"
+readme = "README.md"
+description = "Linux daemon for the Statime Precision Time Protocol library"
+edition = "2021"
+
+[[bin]]
+name = "statime"
+path = "src/main.rs"
+
+[[bin]]
+name = "statime-metrics-exporter"
+path = "bin/statime-metrics-exporter.rs"
+
+[dependencies]
+statime = "*"
+
+arrayvec = "*"
+clap = { version = "4.4.7", features = ["derive"] }
+tracing = "*"
+tracing-log = "*"
+tracing-subscriber = "*"
+hex = "*"
+libc = "*"
+log = { version="*", default-features = true }
+pin-project-lite = "*"
+toml = "*"
+tokio = { version="*", features = ["net", "rt-multi-thread", "time", "macros", "sync", "io-util"] }
+rand = { version="*", default-features = false, features = ["std", "std_rng"] }
+serde = "*"
+serde_json = "*"
+
+clock-steering = "*"
+timestamped-socket= "*"
+
