@@ -17,9 +17,9 @@ statime = "*"
 
 arrayvec = "*"
 clap = { version = "4.4.7", features = ["derive"] }
-tracing = "*"
-tracing-log = "*"
-tracing-subscriber = "*"
+tracing = "0.1.21"
+tracing-log = ">=0.1.0, <0.3.0"
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["std", "fmt", "ansi"] }
 hex = "*"
 libc = "*"
 log = { version="*", default-features = true }
@@ -31,5 +31,4 @@ serde = "*"
 serde_json = "*"
 
 clock-steering = "*"
-timestamped-socket= "*"
-
+timestamped-socket = "0.2.4"
