@@ -1,0 +1,15 @@
+domain = 0
+sdo-id = 0
+priority1 = 0
+priority2 = 0
+path-trace = false
+virtual-system-clock = false
+
+[[port]]
+interface = "wlxd844899294ae"
+announce-interval = 1
+announce-receipt-timeout = 3
+delay-asymmetry = 0
+delay-mechanism = "E2E"
+master-only = true
+network-mode = "ipv4"
