@@ -3,7 +3,6 @@ extern crate core;
 pub mod clock;
 pub mod socket;
 pub mod tlvforwarder;
-pub mod tracing;
 
 use std::{
     future::Future,
@@ -35,28 +34,6 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
     time::Sleep,
 };
-
-// TODO: rewrite blackhaze to use tracing to activate this
-// use tracing::LogLevel;
-// use tracing_log::LogTracer;
-// use tracing_subscriber::util::SubscriberInitExt;
-//
-// pub fn initialize_logging_parse_config(path: &Path) -> Config {
-//     LogTracer::init().expect("Internal error: could not attach logger");
-
-//     // Early setup for logging
-//     let startup_tracing = crate::tracing::tracing_init(LogLevel::default());
-
-//     let config = ::tracing::subscriber::with_default(startup_tracing, || {
-//         Config::from_file(path).unwrap_or_else(|e| {
-//             eprintln!("{e}");
-//             std::process::exit(1);
-//         })
-//     });
-
-//     crate::tracing::tracing_init(config.loglevel).init();
-//     config
-// }
 
 pin_project_lite::pin_project! {
     struct Timer {
@@ -106,6 +83,7 @@ trait PortClock:
 {
     fn clone_box(&self) -> Box<dyn PortClock>;
 }
+
 impl PortClock for LinuxClock {
     fn clone_box(&self) -> Box<dyn PortClock> {
         Box::new(self.clone())
