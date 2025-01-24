@@ -16,7 +16,7 @@ use clock::{LinuxClock, PortTimestampToTime};
 use rand::{rngs::StdRng, SeedableRng};
 use socket::{open_ipv4_event_socket, open_ipv4_general_socket, PtpTargetAddress};
 use statime::{
-    config::{AcceptAnyMaster, ClockIdentity, InstanceConfig, PortConfig, SdoId, TimePropertiesDS},
+    config::{ClockIdentity, InstanceConfig, PortConfig, SdoId, TimePropertiesDS},
     filters::{KalmanConfiguration, KalmanFilter},
     port::{
         is_message_buffer_compatible, InBmca, Port, PortAction, PortActionIterator,
@@ -178,7 +178,7 @@ pub async fn run_time_sync(
         PortConfig {
             announce_interval,
             announce_receipt_timeout,
-            acceptable_master_list: AcceptAnyMaster,
+            acceptable_master_list: None,
             sync_interval,
             master_only: !slave_only,
             delay_asymmetry: Duration::from_nanos(0), // The estimated asymmetry in the link connected to this [`Port`]
@@ -187,7 +187,7 @@ pub async fn run_time_sync(
             },
         },
         KalmanConfiguration::default(),
-        clock.clone(),
+        clock.clone_boxed(),
         rng,
     );
 
@@ -218,7 +218,10 @@ pub async fn run_time_sync(
         ));
     }
 
-    main_task_sender.send(port).await.expect("Failed to send port");
+    main_task_sender
+        .send(port)
+        .await
+        .expect("Failed to send port");
 
     run(
         instance,
@@ -251,7 +254,10 @@ async fn run(
             .send(true)
             .expect("Bmca notification failed");
 
-        let mut bmca_port = main_task_receiver.recv().await.expect("Failed to receive bcma port");
+        let mut bmca_port = main_task_receiver
+            .recv()
+            .await
+            .expect("Failed to receive bcma port");
 
         // have all ports so deassert stop
         bmca_notify_sender
@@ -260,7 +266,10 @@ async fn run(
 
         instance.bmca(&mut [&mut bmca_port]);
 
-        main_task_sender.send(bmca_port).await.expect("Failed to send bmca_port");
+        main_task_sender
+            .send(bmca_port)
+            .await
+            .expect("Failed to send bmca_port");
     }
 }
 // the Port task

@@ -4,14 +4,6 @@ readme = "README.md"
 description = "Linux daemon for the Statime Precision Time Protocol library"
 edition = "2021"
 
-[[bin]]
-name = "statime"
-path = "src/main.rs"
-
-[[bin]]
-name = "statime-metrics-exporter"
-path = "bin/statime-metrics-exporter.rs"
-
 [dependencies]
 statime = "*"
 
