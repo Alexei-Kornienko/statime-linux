@@ -1,14 +1,10 @@
 #![forbid(unsafe_code)]
-
-//! Event and General sockets for linux systems
-
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use timestamped_socket::{
     interface::InterfaceName,
-    networkaddress::{EthernetAddress, MacAddress},
     socket::{
-        open_interface_ethernet, open_interface_udp4, open_interface_udp6, InterfaceTimestampMode,
+        open_interface_udp4, InterfaceTimestampMode,
         Open, Socket,
     },
 };
