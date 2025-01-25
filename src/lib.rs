@@ -117,7 +117,7 @@ pub async fn run_time_sync(
     tunnel_name: &str,
     indentity: [u8; 6],
     priority: u8,
-    slave_only: bool,
+    is_master: bool,
     path_trace: bool,
     use_virtual_clock: bool,
     announce_interval: Interval,
@@ -134,13 +134,13 @@ pub async fn run_time_sync(
     // of the program anyway
     let instance = Box::leak(Box::new(PtpInstance::new(
         InstanceConfig {
-            slave_only,
             path_trace,
             clock_identity: statime::config::ClockIdentity::from_mac_address(indentity),
             priority_1: priority,
             priority_2: priority,
             domain_number: 0,
             sdo_id: SdoId::default(),
+            slave_only: false,
         },
         time_properties_ds,
     )));
@@ -158,7 +158,7 @@ pub async fn run_time_sync(
             announce_receipt_timeout,
             acceptable_master_list: None,
             sync_interval,
-            master_only: !slave_only,
+            master_only: is_master,
             delay_asymmetry: Duration::from_nanos(0), // The estimated asymmetry in the link connected to this [`Port`]
             delay_mechanism: statime::config::DelayMechanism::E2E {
                 interval: Interval::from_log_2(0),
