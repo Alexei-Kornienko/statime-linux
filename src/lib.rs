@@ -7,13 +7,12 @@ pub mod tlvforwarder;
 use std::{
     future::Future,
     pin::{pin, Pin},
-    str::FromStr,
     sync::RwLock,
 };
 
 use clock::{LinuxClock, PortTimestampToTime};
 use rand::{rngs::StdRng, SeedableRng};
-use socket::{open_ipv4_event_socket, open_ipv4_general_socket, PtpTargetAddress};
+use socket::PtpTargetAddress;
 use statime::{
     config::{ClockIdentity, InstanceConfig, PortConfig, SdoId, TimePropertiesDS},
     filters::{KalmanConfiguration, KalmanFilter},
@@ -25,9 +24,8 @@ use statime::{
     Clock, OverlayClock, PtpInstance, PtpInstanceState, SharedClock,
 };
 use timestamped_socket::{
-    interface::InterfaceName,
     networkaddress::NetworkAddress,
-    socket::{Open, Socket},
+    socket::{RecvResult, Timestamp},
 };
 use tlvforwarder::TlvForwarder;
 use tokio::{
@@ -113,8 +111,15 @@ impl SystemClock {
     }
 }
 
-pub async fn run_time_sync(
-    tunnel_name: &str,
+#[async_trait::async_trait]
+pub trait Socket<A: NetworkAddress + PtpTargetAddress>: Send {
+    async fn send_to(&self, buf: &[u8], addr: A) -> std::io::Result<Option<Timestamp>>;
+    async fn recv(&self, buf: &mut [u8]) -> std::io::Result<RecvResult<A>>;
+}
+
+pub async fn run_time_sync<S, A>(
+    event_socket: S,
+    general_socket: S,
     indentity: [u8; 6],
     priority: u8,
     is_master: bool,
@@ -123,7 +128,11 @@ pub async fn run_time_sync(
     announce_interval: Interval,
     announce_receipt_timeout: u8, // wait until the announce message expires.
     sync_interval: Interval,
-) -> ! {
+) -> !
+where
+    S: Socket<A> + 'static,
+    A: NetworkAddress + PtpTargetAddress + 'static,
+{
     let time_properties_ds = TimePropertiesDS::new_arbitrary_time(
         false,
         false,
@@ -172,29 +181,16 @@ pub async fn run_time_sync(
     let (bmca_notify_sender, bmca_notify_receiver) = tokio::sync::watch::channel(false);
     let (main_task_sender, port_task_receiver) = tokio::sync::mpsc::channel(1);
     let (port_task_sender, main_task_receiver) = tokio::sync::mpsc::channel(1);
-    {
-        let interface_name =
-            InterfaceName::from_str(tunnel_name).expect("Failed to parse interface name");
-        let event_socket = open_ipv4_event_socket(
-            interface_name,
-            // software clock supported only
-            timestamped_socket::socket::InterfaceTimestampMode::SoftwareAll,
-            None,
-        )
-        .expect("Failed to open event socket");
-        let general_socket =
-            open_ipv4_general_socket(interface_name).expect("Failed to open general socket");
 
-        tokio::spawn(port_task(
-            port_task_receiver,
-            port_task_sender,
-            event_socket,
-            general_socket,
-            bmca_notify_receiver.clone(),
-            TlvForwarder::new(),
-            clock.clone_boxed(),
-        ));
-    }
+    tokio::spawn(port_task(
+        port_task_receiver,
+        port_task_sender,
+        event_socket,
+        general_socket,
+        bmca_notify_receiver.clone(),
+        TlvForwarder::new(),
+        clock.clone_boxed(),
+    ));
 
     main_task_sender
         .send(port)
@@ -256,15 +252,21 @@ async fn run(
 // It will then move the port into the running state, and process actions. When
 // the task is notified of a BMCA, it will stop running, move the port into the
 // bmca state, and send it on its Sender
-async fn port_task<A: NetworkAddress + PtpTargetAddress>(
+async fn port_task<S, A>(
     mut port_task_receiver: Receiver<BmcaPort>,
     port_task_sender: Sender<BmcaPort>,
-    mut event_socket: Socket<A, Open>,
-    mut general_socket: Socket<A, Open>,
+    event_socket: S,
+    general_socket: S,
     mut bmca_notify: tokio::sync::watch::Receiver<bool>,
     mut tlv_forwarder: TlvForwarder,
     clock: BoxedClock,
-) {
+) where
+    S: Socket<A>,
+    A: NetworkAddress + PtpTargetAddress,
+{
+    let mut event_socket = event_socket;
+    let mut general_socket = general_socket;
+
     let mut timers = Timers {
         port_sync_timer: pin!(Timer::new()),
         port_announce_timer: pin!(Timer::new()),
@@ -388,14 +390,18 @@ struct Timers<'a> {
     filter_update_timer: Pin<&'a mut Timer>,
 }
 
-async fn handle_actions<A: NetworkAddress + PtpTargetAddress>(
+async fn handle_actions<S, A>(
     actions: PortActionIterator<'_>,
-    event_socket: &mut Socket<A, Open>,
-    general_socket: &mut Socket<A, Open>,
+    event_socket: &mut S,
+    general_socket: &mut S,
     timers: &mut Timers<'_>,
     tlv_forwarder: &TlvForwarder,
     clock: &BoxedClock,
-) -> Option<(TimestampContext, Time)> {
+) -> Option<(TimestampContext, Time)>
+where
+    S: Socket<A>,
+    A: NetworkAddress + PtpTargetAddress,
+{
     let mut pending_timestamp = None;
 
     for action in actions {
