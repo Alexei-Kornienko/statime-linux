@@ -11,3 +11,4 @@ tokio = { version="1.41.1", features = ["net", "rt-multi-thread", "time", "macro
 rand = { version="0.8.5", default-features = false, features = ["std", "std_rng"] }
 clock-steering = "0.2.1"
 timestamped-socket = "0.2.4"
+async-trait = "0.1.83"
