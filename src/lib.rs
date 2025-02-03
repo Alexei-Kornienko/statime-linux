@@ -134,7 +134,7 @@ impl<A: NetworkAddress + PtpTargetAddress + Send> InternalSocket<A> {
 
     async fn recv(&mut self, buf: &mut [u8]) -> std::io::Result<RecvResult<A>> {
         let (msg, timestamp) = self.in_ch.recv().await.expect("Closed channel");
-        buf.copy_from_slice(&msg);
+        buf[0..msg.len()].copy_from_slice(&msg);
 
         Ok(RecvResult {
             bytes_read: msg.len(),
@@ -185,6 +185,8 @@ pub async fn run_time_sync<A: NetworkAddress + PtpTargetAddress + Send + 'static
     };
 
     let rng = StdRng::from_entropy();
+    let mut kalman_filter_cfg = KalmanConfiguration::default();
+    kalman_filter_cfg.step_threshold = Duration::from_millis(4);
     let port = instance.add_port(
         PortConfig {
             announce_interval,
@@ -197,7 +199,7 @@ pub async fn run_time_sync<A: NetworkAddress + PtpTargetAddress + Send + 'static
                 interval: Interval::from_log_2(0),
             },
         },
-        KalmanConfiguration::default(),
+        kalman_filter_cfg,
         clock.clone_boxed(),
         rng,
     );
