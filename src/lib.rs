@@ -6,6 +6,7 @@ pub mod tlvforwarder;
 
 use std::{
     future::Future,
+    net::SocketAddrV4,
     pin::{pin, Pin},
     str::FromStr,
     sync::{Arc, RwLock},
@@ -13,7 +14,7 @@ use std::{
 
 use clock::{LinuxClock, PortTimestampToTime};
 use rand::{rngs::StdRng, SeedableRng};
-use socket::{open_ipv4_event_socket, open_ipv4_general_socket, PtpTargetAddress};
+use socket::{open_ipv4_general_socket, PtpTargetAddress};
 use statime::{
     config::{ClockIdentity, InstanceConfig, PortConfig, SdoId, TimePropertiesDS},
     filters::{KalmanConfiguration, KalmanFilter},
@@ -27,7 +28,7 @@ use statime::{
 use timestamped_socket::{
     interface::InterfaceName,
     networkaddress::NetworkAddress,
-    socket::{Open, RecvResult, Timestamp},
+    socket::{Open, RecvResult, Socket, Timestamp},
 };
 use tlvforwarder::TlvForwarder;
 use tokio::{
@@ -113,13 +114,13 @@ impl SystemClock {
     }
 }
 
-pub struct Socket<A: NetworkAddress + PtpTargetAddress + Send> {
+pub struct InternalSocket<A: NetworkAddress + PtpTargetAddress + Send> {
     pub out_ch: tokio::sync::mpsc::Sender<(Vec<u8>, A)>,
     pub in_ch: tokio::sync::mpsc::Receiver<(Vec<u8>, Timestamp)>,
     pub timestamp_ch: tokio::sync::mpsc::Receiver<Timestamp>,
 }
 
-impl<A: NetworkAddress + PtpTargetAddress + Send> Socket<A> {
+impl<A: NetworkAddress + PtpTargetAddress + Send> InternalSocket<A> {
     async fn send_to(&mut self, buf: &[u8], addr: A) -> std::io::Result<Option<Timestamp>> {
         self.out_ch
             .send((buf.into(), addr))
@@ -144,11 +145,9 @@ impl<A: NetworkAddress + PtpTargetAddress + Send> Socket<A> {
 }
 
 pub async fn run_time_sync<A: NetworkAddress + PtpTargetAddress + Send + 'static>(
-    announce_notifier: Arc<tokio::sync::Notify>,
     sync_notifier: Arc<tokio::sync::Notify>,
-    general_socket: Socket<A>,
-    event_socket: Socket<A>,
-    // tunnel_name: &str,
+    event_socket: InternalSocket<A>,
+    tunnel_name: &str,
     indentity: [u8; 6],
     priority: u8,
     is_master: bool,
@@ -207,20 +206,12 @@ pub async fn run_time_sync<A: NetworkAddress + PtpTargetAddress + Send + 'static
     let (main_task_sender, port_task_receiver) = tokio::sync::mpsc::channel(1);
     let (port_task_sender, main_task_receiver) = tokio::sync::mpsc::channel(1);
     {
-        // let interface_name =
-        //     InterfaceName::from_str(tunnel_name).expect("Failed to parse interface name");
-        // let event_socket = open_ipv4_event_socket(
-        //     interface_name,
-        //     // software clock supported only
-        //     timestamped_socket::socket::InterfaceTimestampMode::SoftwareAll,
-        //     None,
-        // )
-        // .expect("Failed to open event socket");
-        // let general_socket =
-        //     open_ipv4_general_socket(interface_name).expect("Failed to open general socket");
+        let interface_name =
+            InterfaceName::from_str(tunnel_name).expect("Failed to parse interface name");
+        let general_socket =
+            open_ipv4_general_socket(interface_name).expect("Failed to open general socket");
 
         tokio::spawn(port_task(
-            announce_notifier,
             sync_notifier,
             port_task_receiver,
             port_task_sender,
@@ -293,17 +284,17 @@ async fn run(
 // the task is notified of a BMCA, it will stop running, move the port into the
 // bmca state, and send it on its Sender
 async fn port_task<A: NetworkAddress + PtpTargetAddress + Send>(
-    announce_notifier: Arc<tokio::sync::Notify>,
     sync_notifier: Arc<tokio::sync::Notify>,
     mut port_task_receiver: Receiver<BmcaPort>,
     port_task_sender: Sender<BmcaPort>,
-    mut event_socket: Socket<A>,
-    mut general_socket: Socket<A>,
+    mut event_socket: InternalSocket<A>,
+    mut general_socket: Socket<SocketAddrV4, Open>,
     mut bmca_notify: tokio::sync::watch::Receiver<bool>,
     mut tlv_forwarder: TlvForwarder,
     clock: BoxedClock,
 ) {
     let mut timers = Timers {
+        port_announce_timer: pin!(Timer::new()),
         port_announce_timeout_timer: pin!(Timer::new()),
         delay_request_timer: pin!(Timer::new()),
         filter_update_timer: pin!(Timer::new()),
@@ -361,7 +352,7 @@ async fn port_task<A: NetworkAddress + PtpTargetAddress + Send>(
                     Ok(packet) => port.handle_general_receive(&general_buffer[..packet.bytes_read]),
                     Err(error) => panic!("Error receiving: {error:?}"),
                 },
-                () = announce_notifier.notified() => {
+                () = &mut timers.port_announce_timer => {
                     port.handle_announce_timer(&mut tlv_forwarder)
                 },
                 () = sync_notifier.notified() => {
@@ -417,6 +408,7 @@ type BmcaPort = Port<
 >;
 
 struct Timers<'a> {
+    port_announce_timer: Pin<&'a mut Timer>,
     port_announce_timeout_timer: Pin<&'a mut Timer>,
     delay_request_timer: Pin<&'a mut Timer>,
     filter_update_timer: Pin<&'a mut Timer>,
@@ -424,8 +416,8 @@ struct Timers<'a> {
 
 async fn handle_actions<A: NetworkAddress + PtpTargetAddress + Send>(
     actions: PortActionIterator<'_>,
-    event_socket: &mut Socket<A>,
-    general_socket: &mut Socket<A>,
+    event_socket: &mut InternalSocket<A>,
+    general_socket: &mut Socket<SocketAddrV4, Open>,
     timers: &mut Timers<'_>,
     tlv_forwarder: &TlvForwarder,
     clock: &BoxedClock,
@@ -465,13 +457,16 @@ async fn handle_actions<A: NetworkAddress + PtpTargetAddress + Send>(
                     .send_to(
                         data,
                         if link_local {
-                            A::PDELAY_GENERAL
+                            SocketAddrV4::PDELAY_GENERAL
                         } else {
-                            A::PRIMARY_GENERAL
+                            SocketAddrV4::PRIMARY_GENERAL
                         },
                     )
                     .await
                     .expect("Failed to send general message");
+            }
+            PortAction::ResetAnnounceTimer { duration } => {
+                timers.port_announce_timer.as_mut().reset(duration);
             }
             PortAction::ResetDelayRequestTimer { duration } => {
                 timers.delay_request_timer.as_mut().reset(duration);
