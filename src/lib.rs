@@ -79,7 +79,7 @@ impl Future for Timer {
     }
 }
 
-trait PortClock:
+pub trait PortClock:
     Clock<Error = <LinuxClock as Clock>::Error> + PortTimestampToTime + Send + Sync
 {
     fn clone_box(&self) -> Box<dyn PortClock>;
