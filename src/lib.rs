@@ -187,7 +187,11 @@ pub async fn run_time_sync<A: NetworkAddress + PtpTargetAddress + Send + 'static
     let rng = StdRng::from_entropy();
     let mut kalman_filter_cfg = KalmanConfiguration::default();
     kalman_filter_cfg.step_threshold = Duration::from_millis(50);
-    kalman_filter_cfg.deadzone = 0.5;
+    // kalman_filter_cfg.deadzone = 2.0;
+    kalman_filter_cfg.steer_time = Duration::from_secs(5);
+    kalman_filter_cfg.difference_estimation_boundary = 16;
+    kalman_filter_cfg.statistical_estimation_boundary = 32;
+    //kalman_filter_cfg.delay_wander *= 10.0;
     let port = instance.add_port(
         PortConfig {
             announce_interval,
